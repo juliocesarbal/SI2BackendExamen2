@@ -38,7 +38,19 @@ urlpatterns = [
     path('carrito/clear', views.clear_cart, name='clear_cart'),
     path('carrito/checkout', views.checkout, name='checkout'),
 
-    # Products & Inventory
+    # Categories, Brands & Units
+    path('categorias', views.categorias, name='categorias'),
+    path('categorias/<int:categoria_id>', views.categoria_detail, name='categoria_detail'),
+    path('marcas', views.marcas, name='marcas'),
+    path('marcas/<int:marca_id>', views.marca_detail, name='marca_detail'),
+    path('unidades', views.unidades, name='unidades'),
+    path('unidades/<int:unidad_id>', views.unidad_detail, name='unidad_detail'),
+
+    # Products
+    path('productos', views.productos, name='productos'),
+    path('productos/<int:producto_id>', views.producto_detail, name='producto_detail'),
+
+    # Products & Inventory (Lotes)
     path('productos/<int:producto_id>/lotes', views.get_producto_lotes, name='get_producto_lotes'),
     path('productos/<int:producto_id>/lotes/create', views.create_lote, name='create_lote'),
     path('lotes/<int:lote_id>', views.update_lote, name='update_lote'),

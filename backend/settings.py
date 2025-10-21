@@ -53,6 +53,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Our custom auth middleware runs LAST to override Django's authentication
     'api.middleware.AuthMiddleware',
 ]
 
@@ -133,7 +134,9 @@ AUTH_USER_MODEL = 'api.User'
 
 # REST Framework
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': [],
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'api.authentication.CookieTokenAuthentication',
+    ],
     'DEFAULT_PERMISSION_CLASSES': [],
     'EXCEPTION_HANDLER': 'api.utils.custom_exception_handler',
 }

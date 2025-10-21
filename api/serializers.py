@@ -39,12 +39,19 @@ class UserRoleSerializer(serializers.ModelSerializer):
 
 class UserSerializer(serializers.ModelSerializer):
     roles = serializers.SerializerMethodField()
+    role = serializers.SerializerMethodField()
     password = serializers.CharField(write_only=True, required=False)
+
+    # CamelCase fields for frontend
+    firstName = serializers.CharField(source='first_name', read_only=True)
+    lastName = serializers.CharField(source='last_name', read_only=True)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
 
     class Meta:
         model = User
-        fields = ['id', 'email', 'first_name', 'last_name', 'telefono',
-                  'status', 'created_at', 'updated_at', 'roles', 'password']
+        fields = ['id', 'email', 'firstName', 'lastName', 'telefono',
+                  'status', 'createdAt', 'updatedAt', 'roles', 'role', 'password']
         extra_kwargs = {
             'password': {'write_only': True}
         }
@@ -52,6 +59,17 @@ class UserSerializer(serializers.ModelSerializer):
     def get_roles(self, obj):
         user_roles = UserRole.objects.filter(user=obj).select_related('role')
         return [ur.role.name for ur in user_roles]
+
+    def get_role(self, obj):
+        """Return first role as object for frontend compatibility"""
+        user_role = UserRole.objects.filter(user=obj).select_related('role').first()
+        if user_role and user_role.role:
+            return {
+                'id': user_role.role.id,
+                'name': user_role.role.name,
+                'description': user_role.role.description
+            }
+        return None
 
     def create(self, validated_data):
         password = validated_data.pop('password', None)
@@ -98,11 +116,13 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class MeSerializer(serializers.ModelSerializer):
+    firstName = serializers.CharField(source='first_name', read_only=True)
+    lastName = serializers.CharField(source='last_name', read_only=True)
     permissions = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ['id', 'email', 'first_name', 'last_name', 'permissions']
+        fields = ['id', 'email', 'firstName', 'lastName', 'permissions']
 
     def get_permissions(self, obj):
         from .utils import get_user_permissions
@@ -132,11 +152,21 @@ class UnidadSerializer(serializers.ModelSerializer):
 class ProductoListSerializer(serializers.ModelSerializer):
     marca = MarcaSerializer(read_only=True)
     categoria = CategoriaSerializer(read_only=True)
+    unidad = UnidadSerializer(read_only=True)
+
+    # CamelCase fields for frontend
+    imageUrl = serializers.CharField(source='image_url', read_only=True)
+    imageKey = serializers.CharField(source='image_key', read_only=True)
+    stockActual = serializers.IntegerField(source='stock_actual', read_only=True)
+    stockMinimo = serializers.IntegerField(source='stock_minimo', read_only=True)
+    creadoEn = serializers.DateTimeField(source='creado_en', read_only=True)
+    actualizadoEn = serializers.DateTimeField(source='actualizado_en', read_only=True)
 
     class Meta:
         model = Producto
-        fields = ['id', 'nombre', 'descripcion', 'precio', 'image_url',
-                  'image_key', 'marca', 'categoria', 'stock_actual', 'activo']
+        fields = ['id', 'nombre', 'descripcion', 'precio', 'imageUrl',
+                  'imageKey', 'marca', 'categoria', 'unidad', 'stockActual',
+                  'stockMinimo', 'activo', 'creadoEn', 'actualizadoEn']
 
 
 class ProductoDetailSerializer(serializers.ModelSerializer):
@@ -144,9 +174,17 @@ class ProductoDetailSerializer(serializers.ModelSerializer):
     categoria = CategoriaSerializer(read_only=True)
     unidad = UnidadSerializer(read_only=True)
 
+    # Accept both snake_case and camelCase for compatibility
     marca_id = serializers.IntegerField(write_only=True, required=False)
     categoria_id = serializers.IntegerField(write_only=True, required=False)
     unidad_id = serializers.IntegerField(write_only=True, required=False)
+
+    marcaId = serializers.IntegerField(write_only=True, required=False, source='marca_id')
+    categoriaId = serializers.IntegerField(write_only=True, required=False, source='categoria_id')
+    unidadId = serializers.IntegerField(write_only=True, required=False, source='unidad_id')
+    stockMinimo = serializers.IntegerField(write_only=True, required=False, source='stock_minimo')
+    imageUrl = serializers.CharField(write_only=True, required=False, allow_blank=True, source='image_url')
+    imageKey = serializers.CharField(write_only=True, required=False, allow_blank=True, source='image_key')
 
     class Meta:
         model = Producto

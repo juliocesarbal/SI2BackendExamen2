@@ -99,11 +99,26 @@ def logout(request):
 @api_view(['GET'])
 def me(request):
     """Get current user info"""
-    if not request.user:
+    from django.contrib.auth.models import AnonymousUser
+
+    # Debug: print what type of user we have
+    print(f"DEBUG /me VIEW: request.user type = {type(request.user)}, value = {request.user}")
+
+    # Check if user is authenticated
+    if not request.user or isinstance(request.user, AnonymousUser):
         return Response({'message': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    serializer = MeSerializer(request.user)
-    return Response(serializer.data)
+    try:
+        serializer = MeSerializer(request.user)
+        return Response(serializer.data)
+    except Exception as e:
+        # Log the error for debugging
+        import traceback
+        traceback.print_exc()
+        return Response({
+            'message': 'Error fetching user data',
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ============== PUBLIC ENDPOINTS ==============
@@ -559,6 +574,218 @@ def checkout(request):
     cart_items.delete()
 
     return Response({'id': orden.id, 'total': float(total)}, status=status.HTTP_201_CREATED)
+
+
+# ============== CATEGORIES, BRANDS & UNITS ==============
+
+@api_view(['GET', 'POST'])
+def categorias(request):
+    """List or create categories"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if request.method == 'GET':
+        categorias = Categoria.objects.all().order_by('nombre')
+        serializer = CategoriaSerializer(categorias, many=True)
+        return Response(serializer.data)
+
+    elif request.method == 'POST':
+        serializer = CategoriaSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+def categoria_detail(request, categoria_id):
+    """Get, update or delete a category"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        categoria = Categoria.objects.get(id=categoria_id)
+    except Categoria.DoesNotExist:
+        return Response({'message': 'Category not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        serializer = CategoriaSerializer(categoria)
+        return Response(serializer.data)
+
+    elif request.method == 'PUT':
+        serializer = CategoriaSerializer(categoria, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    elif request.method == 'DELETE':
+        categoria.delete()
+        return Response({'message': 'Category deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(['GET', 'POST'])
+def marcas(request):
+    """List or create brands"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if request.method == 'GET':
+        marcas = Marca.objects.all().order_by('nombre')
+        serializer = MarcaSerializer(marcas, many=True)
+        return Response(serializer.data)
+
+    elif request.method == 'POST':
+        serializer = MarcaSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+def marca_detail(request, marca_id):
+    """Get, update or delete a brand"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        marca = Marca.objects.get(id=marca_id)
+    except Marca.DoesNotExist:
+        return Response({'message': 'Brand not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        serializer = MarcaSerializer(marca)
+        return Response(serializer.data)
+
+    elif request.method == 'PUT':
+        serializer = MarcaSerializer(marca, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    elif request.method == 'DELETE':
+        marca.delete()
+        return Response({'message': 'Brand deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(['GET', 'POST'])
+def unidades(request):
+    """List or create units"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if request.method == 'GET':
+        unidades = Unidad.objects.all().order_by('nombre')
+        serializer = UnidadSerializer(unidades, many=True)
+        return Response(serializer.data)
+
+    elif request.method == 'POST':
+        serializer = UnidadSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+def unidad_detail(request, unidad_id):
+    """Get, update or delete a unit"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        unidad = Unidad.objects.get(id=unidad_id)
+    except Unidad.DoesNotExist:
+        return Response({'message': 'Unit not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        serializer = UnidadSerializer(unidad)
+        return Response(serializer.data)
+
+    elif request.method == 'PUT':
+        serializer = UnidadSerializer(unidad, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    elif request.method == 'DELETE':
+        unidad.delete()
+        return Response({'message': 'Unit deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
+
+
+# ============== PRODUCTS ==============
+
+@api_view(['GET', 'POST'])
+def productos(request):
+    """List or create products"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if request.method == 'GET':
+        queryset = Producto.objects.all().select_related('marca', 'categoria', 'unidad').order_by('-creado_en')
+
+        # Filter by category
+        categoria_id = request.GET.get('categoria_id')
+        if categoria_id:
+            queryset = queryset.filter(categoria_id=categoria_id)
+
+        # Filter by brand
+        marca_id = request.GET.get('marca_id')
+        if marca_id:
+            queryset = queryset.filter(marca_id=marca_id)
+
+        # Filter by active status
+        activo = request.GET.get('activo')
+        if activo is not None:
+            queryset = queryset.filter(activo=activo.lower() == 'true')
+
+        # Search by name
+        search = request.GET.get('search')
+        if search:
+            queryset = queryset.filter(nombre__icontains=search)
+
+        serializer = ProductoListSerializer(queryset, many=True)
+        return Response({
+            'productos': serializer.data,
+            'totalPages': 1  # For now, no pagination
+        })
+
+    elif request.method == 'POST':
+        serializer = ProductoDetailSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
+def producto_detail(request, producto_id):
+    """Get, update or delete a product"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        producto = Producto.objects.select_related('marca', 'categoria', 'unidad').get(id=producto_id)
+    except Producto.DoesNotExist:
+        return Response({'message': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        serializer = ProductoDetailSerializer(producto)
+        return Response(serializer.data)
+
+    elif request.method in ['PUT', 'PATCH']:
+        serializer = ProductoDetailSerializer(producto, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    elif request.method == 'DELETE':
+        producto.delete()
+        return Response({'message': 'Product deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
 
 
 # ============== PRODUCTS & INVENTORY ==============
