@@ -15,8 +15,7 @@ urlpatterns = [
     # Users management
     path('users', views.list_users, name='list_users'),
     path('users/internal', views.create_internal_user, name='create_internal_user'),
-    path('users/<int:user_id>', views.update_user, name='update_user'),
-    path('users/<int:user_id>/delete', views.delete_user, name='delete_user'),
+    path('users/<int:user_id>', views.user_detail, name='user_detail'),
     path('users/clientes', views.list_clientes, name='list_clientes'),
     path('users/clientes/by-date-range', views.clientes_by_date_range, name='clientes_by_date_range'),
 

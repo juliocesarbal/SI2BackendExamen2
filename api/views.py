@@ -216,7 +216,18 @@ def create_internal_user(request):
     if not request.user:
         return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
 
+    # Handle both roleId (number) and roles (array of strings)
+    role_id = request.data.get('roleId')
     roles_data = request.data.get('roles', [])
+
+    # If roleId is provided, convert to roles array
+    if role_id:
+        try:
+            role = Role.objects.get(id=role_id)
+            roles_data = [role.name]
+        except Role.DoesNotExist:
+            pass
+
     serializer = UserSerializer(data=request.data, context={'roles': roles_data})
 
     if serializer.is_valid():
@@ -226,9 +237,9 @@ def create_internal_user(request):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(['PATCH'])
-def update_user(request, user_id):
-    """Update user"""
+@api_view(['PATCH', 'DELETE'])
+def user_detail(request, user_id):
+    """Update or delete user"""
     if not request.user:
         return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
 
@@ -237,28 +248,40 @@ def update_user(request, user_id):
     except User.DoesNotExist:
         return Response({'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    roles_data = request.data.get('roles')
-    serializer = UserSerializer(user, data=request.data, partial=True, context={'roles': roles_data})
+    if request.method == 'PATCH':
+        # Handle both roleId (number) and roles (array of strings)
+        role_id = request.data.get('roleId')
+        roles_data = request.data.get('roles')
 
-    if serializer.is_valid():
-        serializer.save()
-        return Response(serializer.data)
+        # If roleId is provided, convert to roles array
+        if role_id is not None:
+            try:
+                role = Role.objects.get(id=role_id)
+                roles_data = [role.name]
+            except Role.DoesNotExist:
+                roles_data = []
 
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer = UserSerializer(user, data=request.data, partial=True, context={'roles': roles_data})
 
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
 
-@api_view(['DELETE'])
-def delete_user(request, user_id):
-    """Delete user"""
-    if not request.user:
-        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    try:
-        user = User.objects.get(id=user_id)
-        user.delete()
-        return Response({'message': 'User deleted successfully'})
-    except User.DoesNotExist:
-        return Response({'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+    elif request.method == 'DELETE':
+        # Prevent self-deletion
+        if user.id == request.user.id:
+            return Response({'message': 'No puedes eliminar tu propio usuario'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user.delete()
+            return Response({'message': 'User deleted successfully'})
+        except Exception as e:
+            # Log the actual error for debugging
+            import traceback
+            traceback.print_exc()
+            return Response({'message': f'Error al eliminar usuario: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
@@ -421,7 +444,8 @@ def update_role_permissions(request, role_id):
 
     try:
         role = Role.objects.get(id=role_id)
-        permission_ids = request.data.get('permissions', [])
+        # Accept both 'permissions' and 'permissionIds' for compatibility
+        permission_ids = request.data.get('permissionIds') or request.data.get('permissions', [])
 
         # Delete existing permissions
         RolePermission.objects.filter(role=role).delete()

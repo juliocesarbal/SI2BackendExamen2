@@ -25,7 +25,11 @@ class RoleSerializer(serializers.ModelSerializer):
     def get_permissions(self, obj):
         if self.context.get('with_permissions', False):
             role_perms = RolePermission.objects.filter(role=obj).select_related('permission')
-            return PermissionSerializer([rp.permission for rp in role_perms], many=True).data
+            # Frontend expects: [{ permission: { id, key, description } }]
+            return [
+                {'permission': PermissionSerializer(rp.permission).data}
+                for rp in role_perms
+            ]
         return []
 
 
@@ -42,9 +46,9 @@ class UserSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
     password = serializers.CharField(write_only=True, required=False)
 
-    # CamelCase fields for frontend
-    firstName = serializers.CharField(source='first_name', read_only=True)
-    lastName = serializers.CharField(source='last_name', read_only=True)
+    # CamelCase fields for frontend (read and write)
+    firstName = serializers.CharField(source='first_name', required=False)
+    lastName = serializers.CharField(source='last_name', required=False)
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
 
