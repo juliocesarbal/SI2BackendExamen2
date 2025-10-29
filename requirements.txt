@@ -5,3 +5,4 @@ psycopg2-binary==2.9.10
 python-decouple==3.8
 stripe==13.0.1
 dj-database-url==3.0.1
+gunicorn==21.2.0
