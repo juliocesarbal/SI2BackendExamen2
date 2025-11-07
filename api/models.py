@@ -250,7 +250,7 @@ class Lote(models.Model):
     producto = models.ForeignKey(Producto, on_delete=models.CASCADE, related_name='lotes')
     codigo = models.CharField(max_length=255, null=True, blank=True)
     cantidad = models.IntegerField(default=0)
-    fecha_venc = models.DateTimeField()
+    fecha_venc = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

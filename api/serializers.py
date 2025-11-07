@@ -228,12 +228,17 @@ class OrdenItemSerializer(serializers.ModelSerializer):
 
 class OrdenSerializer(serializers.ModelSerializer):
     items = OrdenItemSerializer(many=True, read_only=True)
+    user_email = serializers.EmailField(source='user.email', read_only=True)
+    user_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Orden
-        fields = ['id', 'user_id', 'total', 'estado', 'created_at',
-                  'updated_at', 'items']
+        fields = ['id', 'user_id', 'user_email', 'user_name', 'total', 'estado',
+                  'created_at', 'updated_at', 'items']
         read_only_fields = ['user_id']
+
+    def get_user_name(self, obj):
+        return f"{obj.user.first_name} {obj.user.last_name}".strip() or obj.user.email
 
 
 # ============== INVENTORY SERIALIZERS ==============
@@ -268,7 +273,9 @@ class BitacoraSerializer(serializers.ModelSerializer):
 # ============== PAYMENT SERIALIZERS ==============
 
 class PagoSerializer(serializers.ModelSerializer):
+    orden = OrdenSerializer(read_only=True)
+
     class Meta:
         model = Pago
-        fields = ['id', 'orden_id', 'stripe_id', 'monto', 'estado',
+        fields = ['id', 'orden_id', 'orden', 'stripe_id', 'monto', 'estado',
                   'metodo', 'factura_url', 'created_at']

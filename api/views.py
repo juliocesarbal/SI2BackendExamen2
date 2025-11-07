@@ -3,7 +3,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.utils import timezone
 from decimal import Decimal
 from .models import (
@@ -501,6 +501,10 @@ def add_to_cart(request):
     except Producto.DoesNotExist:
         return Response({'message': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
 
+    # Validar stock disponible
+    if producto.stock_actual <= 0:
+        return Response({'message': 'Producto sin stock disponible'}, status=status.HTTP_400_BAD_REQUEST)
+
     # Check if item already exists in cart
     cart_item, created = CarritoItem.objects.get_or_create(
         user=request.user,
@@ -509,24 +513,52 @@ def add_to_cart(request):
     )
 
     if not created:
-        cart_item.cantidad += cantidad
+        nueva_cantidad = cart_item.cantidad + cantidad
+    else:
+        nueva_cantidad = cantidad
+
+    # Validar que no exceda el stock disponible
+    if nueva_cantidad > producto.stock_actual:
+        return Response({
+            'message': f'Stock insuficiente. Disponible: {producto.stock_actual}, solicitado: {nueva_cantidad}'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    if not created:
+        cart_item.cantidad = nueva_cantidad
         cart_item.save()
 
     serializer = CarritoItemSerializer(cart_item)
     return Response(serializer.data)
 
 
-@api_view(['PATCH'])
+@api_view(['PATCH', 'DELETE'])
 def update_cart_item(request, item_id):
-    """Update cart item quantity"""
+    """Update or delete cart item"""
     if not request.user:
         return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
 
     try:
         item = CarritoItem.objects.get(id=item_id, user=request.user)
+
+        # DELETE: Eliminar item del carrito
+        if request.method == 'DELETE':
+            item.delete()
+            return Response({'message': 'Item removed from cart'})
+
+        # PATCH: Actualizar cantidad
         cantidad = request.data.get('cantidad')
 
         if cantidad is not None:
+            # Validar que la cantidad no exceda el stock disponible
+            if cantidad > item.producto.stock_actual:
+                return Response({
+                    'message': f'Stock insuficiente. Disponible: {item.producto.stock_actual}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Validar que la cantidad sea al menos 1
+            if cantidad < 1:
+                return Response({'message': 'La cantidad debe ser al menos 1'}, status=status.HTTP_400_BAD_REQUEST)
+
             item.cantidad = cantidad
             item.save()
 
@@ -560,6 +592,43 @@ def clear_cart(request):
     return Response({'message': 'Cart cleared'})
 
 
+@api_view(['GET'])
+def list_ordenes(request):
+    """List all orders (admin) or user's orders"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    from .utils import has_permission
+
+    # Si tiene permiso admin, mostrar todas las órdenes
+    if has_permission(request.user, 'order.read'):
+        ordenes = Orden.objects.all().select_related('user').prefetch_related('items__producto').order_by('-created_at')
+    else:
+        ordenes = Orden.objects.filter(user=request.user).prefetch_related('items__producto').order_by('-created_at')
+
+    serializer = OrdenSerializer(ordenes, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+def get_orden(request, orden_id):
+    """Get order detail"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        from .utils import has_permission
+        if has_permission(request.user, 'order.read'):
+            orden = Orden.objects.get(id=orden_id)
+        else:
+            orden = Orden.objects.get(id=orden_id, user=request.user)
+
+        orden_data = OrdenSerializer(orden).data
+        return Response(orden_data)
+    except Orden.DoesNotExist:
+        return Response({'message': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
 @api_view(['POST'])
 def checkout(request):
     """Create order from cart"""
@@ -571,6 +640,13 @@ def checkout(request):
 
     if not cart_items.exists():
         return Response({'message': 'Cart is empty'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Validar stock antes de crear la orden
+    for item in cart_items:
+        if item.cantidad > item.producto.stock_actual:
+            return Response({
+                'message': f'Stock insuficiente para {item.producto.nombre}. Disponible: {item.producto.stock_actual}'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
     # Calculate total
     total = Decimal('0.00')
@@ -584,7 +660,7 @@ def checkout(request):
         estado=EstadoOrden.PENDIENTE
     )
 
-    # Create order items
+    # Create order items and reduce stock
     for item in cart_items:
         OrdenItem.objects.create(
             orden=orden,
@@ -593,6 +669,9 @@ def checkout(request):
             precio_unitario=item.producto.precio,
             subtotal=item.producto.precio * item.cantidad
         )
+        # Reducir stock
+        item.producto.stock_actual -= item.cantidad
+        item.producto.save()
 
     # Clear cart
     cart_items.delete()
@@ -836,12 +915,18 @@ def create_lote(request, producto_id):
     except Producto.DoesNotExist:
         return Response({'message': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    data = request.data.copy()
-    data['producto_id'] = producto_id
-
-    serializer = LoteSerializer(data=data)
+    serializer = LoteSerializer(data=request.data)
     if serializer.is_valid():
-        serializer.save()
+        # Pasar el producto directamente al save() para asignar la ForeignKey
+        lote = serializer.save(producto=producto)
+
+        # Actualizar stock_actual del producto sumando todos los lotes
+        total_stock = Lote.objects.filter(producto=producto).aggregate(
+            total=Sum('cantidad')
+        )['total'] or 0
+        producto.stock_actual = total_stock
+        producto.save()
+
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -855,9 +940,17 @@ def update_lote(request, lote_id):
 
     try:
         lote = Lote.objects.get(id=lote_id)
+        producto_id = lote.producto_id
         serializer = LoteSerializer(lote, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
+
+            # Actualizar stock_actual del producto sumando todos los lotes
+            total_stock = Lote.objects.filter(producto_id=producto_id).aggregate(
+                total=Sum('cantidad')
+            )['total'] or 0
+            Producto.objects.filter(id=producto_id).update(stock_actual=total_stock)
+
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     except Lote.DoesNotExist:
@@ -872,7 +965,15 @@ def delete_lote(request, lote_id):
 
     try:
         lote = Lote.objects.get(id=lote_id)
+        producto_id = lote.producto_id
         lote.delete()
+
+        # Actualizar stock_actual del producto sumando todos los lotes restantes
+        total_stock = Lote.objects.filter(producto_id=producto_id).aggregate(
+            total=Sum('cantidad')
+        )['total'] or 0
+        Producto.objects.filter(id=producto_id).update(stock_actual=total_stock)
+
         return Response({'message': 'Lote deleted successfully'})
     except Lote.DoesNotExist:
         return Response({'message': 'Lote not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -1068,11 +1169,18 @@ def confirm_pago(request):
 
 @api_view(['GET'])
 def list_pagos(request):
-    """Get all payments/invoices"""
+    """Get all payments/invoices (user or admin)"""
     if not request.user:
         return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    pagos = Pago.objects.filter(orden__user=request.user).select_related('orden')
+    # Si el usuario tiene permiso admin, mostrar todos los pagos
+    # Sino, solo mostrar sus propios pagos
+    from .utils import has_permission
+    if has_permission(request.user, 'order.read'):
+        pagos = Pago.objects.all().select_related('orden', 'orden__user').order_by('-created_at')
+    else:
+        pagos = Pago.objects.filter(orden__user=request.user).select_related('orden').order_by('-created_at')
+
     serializer = PagoSerializer(pagos, many=True)
     return Response(serializer.data)
 

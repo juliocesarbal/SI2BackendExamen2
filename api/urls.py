@@ -37,6 +37,10 @@ urlpatterns = [
     path('carrito/clear', views.clear_cart, name='clear_cart'),
     path('carrito/checkout', views.checkout, name='checkout'),
 
+    # Orders
+    path('ordenes', views.list_ordenes, name='list_ordenes'),
+    path('ordenes/<int:orden_id>', views.get_orden, name='get_orden'),
+
     # Categories, Brands & Units
     path('categorias', views.categorias, name='categorias'),
     path('categorias/<int:categoria_id>', views.categoria_detail, name='categoria_detail'),
