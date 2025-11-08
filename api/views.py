@@ -1197,7 +1197,7 @@ def confirm_pago(request):
 
 @api_view(['GET'])
 def list_pagos(request):
-    """Get all payments/invoices (user or admin)"""
+    """Get all payments/invoices (admin only - shows all customers)"""
     if not request.user:
         return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
 
@@ -1214,13 +1214,33 @@ def list_pagos(request):
 
 
 @api_view(['GET'])
+def my_pagos(request):
+    """Get current user's payments/invoices only (always filtered by current user)"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Siempre filtrar por el usuario actual, sin importar permisos
+    pagos = Pago.objects.filter(orden__user=request.user).select_related('orden').order_by('-created_at')
+    serializer = PagoSerializer(pagos, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
 def get_pago(request, pago_id):
     """Get specific payment/invoice"""
     if not request.user:
         return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
 
     try:
-        pago = Pago.objects.get(id=pago_id, orden__user=request.user)
+        from .utils import has_permission
+
+        # Si es admin, puede ver cualquier factura
+        if has_permission(request.user, 'order.read'):
+            pago = Pago.objects.get(id=pago_id)
+        else:
+            # Si no es admin, solo puede ver sus propias facturas
+            pago = Pago.objects.get(id=pago_id, orden__user=request.user)
+
         serializer = PagoSerializer(pago)
         return Response(serializer.data)
     except Pago.DoesNotExist:

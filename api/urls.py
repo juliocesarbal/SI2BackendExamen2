@@ -72,7 +72,8 @@ urlpatterns = [
     # Payments
     path('pagos/crear', views.create_pago, name='create_pago'),
     path('pagos/confirmar', views.confirm_pago, name='confirm_pago'),
-    path('pagos/facturas', views.list_pagos, name='list_pagos'),
+    path('pagos/facturas', views.list_pagos, name='list_pagos'),  # Admin: todas las facturas
+    path('pagos/mis-facturas', views.my_pagos, name='my_pagos'),  # Cliente: solo mis facturas
     path('pagos/factura/<int:pago_id>', views.get_pago, name='get_pago'),
 
     # Chat AI
