@@ -23,6 +23,7 @@ from .serializers import (
 from .utils import create_auth_token, get_client_ip, get_user_permissions
 from django.conf import settings
 import stripe
+import os
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -1158,6 +1159,9 @@ def create_pago(request):
 
     # Create Stripe checkout session
     try:
+        # Get frontend URL from environment or use default
+        frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
@@ -1171,8 +1175,8 @@ def create_pago(request):
                 'quantity': 1,
             }],
             mode='payment',
-            success_url='http://localhost:3000/success?session_id={CHECKOUT_SESSION_ID}',
-            cancel_url='http://localhost:3000/cancel',
+            success_url=f'{frontend_url}/success?session_id={{CHECKOUT_SESSION_ID}}',
+            cancel_url=f'{frontend_url}/cancel',
         )
 
         # Save payment info
