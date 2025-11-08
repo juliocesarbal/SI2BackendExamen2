@@ -66,3 +66,53 @@ def has_permission(user, permission_key):
 
     permissions = get_user_permissions(user)
     return permission_key in permissions
+
+
+def log_ok(request, acciones):
+    """
+    Log successful action to bitacora
+
+    Args:
+        request: Django request object
+        acciones: Description of the action (str)
+    """
+    from .models import Bitacora
+
+    if not request.user or not hasattr(request.user, 'id'):
+        return
+
+    try:
+        Bitacora.objects.create(
+            user=request.user,
+            ip=get_client_ip(request),
+            acciones=acciones,
+            estado='EXITOSO'
+        )
+    except Exception as e:
+        # Don't let logging errors break the app
+        print(f"Error logging to bitacora: {e}")
+
+
+def log_fail(request, acciones):
+    """
+    Log failed action to bitacora
+
+    Args:
+        request: Django request object
+        acciones: Description of the action (str)
+    """
+    from .models import Bitacora
+
+    if not request.user or not hasattr(request.user, 'id'):
+        return
+
+    try:
+        Bitacora.objects.create(
+            user=request.user,
+            ip=get_client_ip(request),
+            acciones=acciones,
+            estado='FALLIDO'
+        )
+    except Exception as e:
+        # Don't let logging errors break the app
+        print(f"Error logging to bitacora: {e}")

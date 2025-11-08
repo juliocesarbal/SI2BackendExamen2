@@ -265,11 +265,36 @@ class AlertSerializer(serializers.ModelSerializer):
 # ============== AUDIT LOG SERIALIZERS ==============
 
 class BitacoraSerializer(serializers.ModelSerializer):
-    user_email = serializers.CharField(source='user.email', read_only=True)
+    user = serializers.SerializerMethodField()
+    userId = serializers.IntegerField(source='user_id', read_only=True)
+    fecha_entrada = serializers.SerializerMethodField()
+    hora_entrada = serializers.SerializerMethodField()
 
     class Meta:
         model = Bitacora
-        fields = ['id', 'user_id', 'user_email', 'ip', 'acciones', 'estado', 'created_at']
+        fields = ['id', 'userId', 'user', 'ip', 'acciones', 'estado', 'fecha_entrada', 'hora_entrada']
+
+    def get_user(self, obj):
+        if obj.user:
+            return {
+                'id': obj.user.id,
+                'email': obj.user.email,
+                'firstName': obj.user.first_name,
+                'lastName': obj.user.last_name
+            }
+        return None
+
+    def get_fecha_entrada(self, obj):
+        # Convert UTC to Bolivia timezone (UTC-4) and return date as YYYY-MM-DD
+        from datetime import timedelta
+        bolivia_time = obj.created_at - timedelta(hours=4)
+        return bolivia_time.strftime('%Y-%m-%d')
+
+    def get_hora_entrada(self, obj):
+        # Convert UTC to Bolivia timezone (UTC-4) and return time as HH:MM:SS
+        from datetime import timedelta
+        bolivia_time = obj.created_at - timedelta(hours=4)
+        return bolivia_time.strftime('%H:%M:%S')
 
 
 # ============== PAYMENT SERIALIZERS ==============

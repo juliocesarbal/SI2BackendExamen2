@@ -1081,21 +1081,34 @@ def create_bitacora(request):
 
 @api_view(['GET'])
 def list_bitacora(request):
-    """Get audit logs with filters"""
+    """Get audit logs with advanced filters"""
     if not request.user:
         return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    queryset = Bitacora.objects.all().select_related('user')
+    from django.db.models import Q
 
-    # Filters
+    queryset = Bitacora.objects.all().select_related('user').order_by('-id')
+
+    # Filter by userId
     user_id = request.GET.get('userId')
     if user_id:
         queryset = queryset.filter(user_id=user_id)
 
+    # Filter by estado
     estado = request.GET.get('estado')
     if estado:
         queryset = queryset.filter(estado=estado)
 
+    # Filter by nombre (search in firstName, lastName, email)
+    nombre = request.GET.get('nombre', '').strip()
+    if nombre:
+        queryset = queryset.filter(
+            Q(user__first_name__icontains=nombre) |
+            Q(user__last_name__icontains=nombre) |
+            Q(user__email__icontains=nombre)
+        )
+
+    # Filter by date range (desde/hasta are in ISO format with timezone)
     desde = request.GET.get('desde')
     if desde:
         queryset = queryset.filter(created_at__gte=desde)
@@ -1106,20 +1119,23 @@ def list_bitacora(request):
 
     # Pagination
     page = int(request.GET.get('page', 1))
-    per_page = int(request.GET.get('perPage', 10))
+    page_size = int(request.GET.get('pageSize', request.GET.get('perPage', 20)))
+
+    # Limit page_size to max 100
+    page_size = min(page_size, 100)
 
     total = queryset.count()
-    start = (page - 1) * per_page
-    end = start + per_page
+    start = (page - 1) * page_size
+    end = start + page_size
 
     logs = queryset[start:end]
     serializer = BitacoraSerializer(logs, many=True)
 
     return Response({
-        'data': serializer.data,
+        'items': serializer.data,
         'total': total,
         'page': page,
-        'perPage': per_page
+        'pageSize': page_size
     })
 
 
