@@ -1231,13 +1231,45 @@ def get_pago(request, pago_id):
 
 @api_view(['POST'])
 def chat_ai(request):
-    """Simple chat AI endpoint (placeholder)"""
-    if not request.user:
-        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+    """Chat AI endpoint using Gemini"""
+    # Note: This endpoint is public, no authentication required
+    # if not request.user:
+    #     return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
 
     message = request.data.get('message', '')
 
-    # Placeholder response
-    response_text = f"Recibí tu mensaje: '{message}'. Esta es una respuesta de prueba del chatbot."
+    if not message:
+        return Response({'message': 'El mensaje es requerido'}, status=status.HTTP_400_BAD_REQUEST)
 
-    return Response({'response': response_text})
+    try:
+        from .gemini_service import GeminiService, ProductoSimplificado
+
+        # Get all active products
+        productos = Producto.objects.filter(activo=True).select_related('marca', 'categoria')
+
+        # Convert to simplified format
+        productos_simplificados = [
+            ProductoSimplificado(
+                id=p.id,
+                nombre=p.nombre,
+                descripcion=p.descripcion or '',
+                precio=float(p.precio),
+                marca=p.marca.nombre,
+                categoria=p.categoria.nombre
+            )
+            for p in productos
+        ]
+
+        # Process with Gemini
+        gemini_service = GeminiService()
+        result = gemini_service.chat(message, productos_simplificados)
+
+        return Response(result)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return Response({
+            'message': 'Error al procesar el mensaje',
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -167,3 +167,6 @@ AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default='')
 AWS_REGION = config('AWS_REGION', default='sa-east-1')
 S3_BUCKET = config('S3_BUCKET', default='')
 CDN_BASE_URL = config('CDN_BASE_URL', default='')
+
+# Gemini AI Settings
+GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
