@@ -1210,6 +1210,15 @@ def confirm_pago(request):
         pago.orden.estado = EstadoOrden.PAGADA
         pago.orden.save()
 
+        # Registrar venta en bitácora
+        ip = get_client_ip(request)
+        Bitacora.objects.create(
+            user=request.user,
+            ip=ip,
+            acciones=f'Venta confirmada - Orden #{pago.orden.id} - Monto: ${pago.monto}',
+            estado=EstadoBitacora.EXITOSO
+        )
+
         return Response({'message': 'Payment confirmed'})
     except Pago.DoesNotExist:
         return Response({'message': 'Payment not found'}, status=status.HTTP_404_NOT_FOUND)
