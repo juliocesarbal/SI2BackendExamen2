@@ -50,6 +50,7 @@ urlpatterns = [
     path('unidades/<int:unidad_id>', views.unidad_detail, name='unidad_detail'),
 
     # Products
+    path('productos/presign', views.productos_presign, name='productos_presign'),
     path('productos', views.productos, name='productos'),
     path('productos/<int:producto_id>', views.producto_detail, name='producto_detail'),
 

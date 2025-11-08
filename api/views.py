@@ -821,6 +821,34 @@ def unidad_detail(request, unidad_id):
 
 # ============== PRODUCTS ==============
 
+@api_view(['GET'])
+def productos_presign(request):
+    """Generate presigned URL for uploading product images to S3"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    from .s3_service import S3Service
+    from datetime import datetime
+
+    # Get query parameters
+    filename = request.GET.get('filename', 'img.webp')
+    content_type = request.GET.get('contentType', 'image/webp')
+
+    # Sanitize filename: replace spaces with dashes and convert to lowercase
+    safe_filename = filename.replace(' ', '-').lower()
+
+    # Generate unique key with timestamp
+    timestamp = int(datetime.now().timestamp() * 1000)  # milliseconds
+    key = f"productos/tmp/{timestamp}-{safe_filename}"
+
+    try:
+        s3_service = S3Service()
+        result = s3_service.generate_presigned_upload_url(key, content_type)
+        return Response(result)
+    except Exception as e:
+        return Response({'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['GET', 'POST'])
 def productos(request):
     """List or create products"""

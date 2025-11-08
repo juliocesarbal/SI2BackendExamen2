@@ -163,6 +163,7 @@ class ProductoListSerializer(serializers.ModelSerializer):
     imageKey = serializers.CharField(source='image_key', read_only=True)
     stockActual = serializers.IntegerField(source='stock_actual', read_only=True)
     stockMinimo = serializers.IntegerField(source='stock_minimo', read_only=True)
+    requiereReceta = serializers.BooleanField(source='requiere_receta', read_only=True)
     creadoEn = serializers.DateTimeField(source='creado_en', read_only=True)
     actualizadoEn = serializers.DateTimeField(source='actualizado_en', read_only=True)
 
@@ -170,7 +171,7 @@ class ProductoListSerializer(serializers.ModelSerializer):
         model = Producto
         fields = ['id', 'nombre', 'descripcion', 'precio', 'imageUrl',
                   'imageKey', 'marca', 'categoria', 'unidad', 'stockActual',
-                  'stockMinimo', 'activo', 'creadoEn', 'actualizadoEn']
+                  'stockMinimo', 'activo', 'requiereReceta', 'creadoEn', 'actualizadoEn']
 
 
 class ProductoDetailSerializer(serializers.ModelSerializer):
@@ -187,6 +188,7 @@ class ProductoDetailSerializer(serializers.ModelSerializer):
     categoriaId = serializers.IntegerField(write_only=True, required=False, source='categoria_id')
     unidadId = serializers.IntegerField(write_only=True, required=False, source='unidad_id')
     stockMinimo = serializers.IntegerField(write_only=True, required=False, source='stock_minimo')
+    requiereReceta = serializers.BooleanField(write_only=True, required=False, source='requiere_receta')
     imageUrl = serializers.CharField(write_only=True, required=False, allow_blank=True, source='image_url')
     imageKey = serializers.CharField(write_only=True, required=False, allow_blank=True, source='image_key')
 

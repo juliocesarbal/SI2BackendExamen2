@@ -160,3 +160,10 @@ SESSION_COOKIE_SECURE = False  # Set to True in production with HTTPS
 # Stripe Settings
 STRIPE_SECRET_KEY = config('STRIPE_SECRET_KEY', default='')
 STRIPE_PUBLISHABLE_KEY = config('STRIPE_PUBLISHABLE_KEY', default='')
+
+# AWS S3 Settings
+AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default='')
+AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default='')
+AWS_REGION = config('AWS_REGION', default='sa-east-1')
+S3_BUCKET = config('S3_BUCKET', default='')
+CDN_BASE_URL = config('CDN_BASE_URL', default='')

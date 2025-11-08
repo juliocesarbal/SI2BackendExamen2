@@ -148,6 +148,7 @@ class Producto(models.Model):
     stock_minimo = models.IntegerField(default=0)
     stock_actual = models.IntegerField(default=0)
     activo = models.BooleanField(default=True)
+    requiere_receta = models.BooleanField(default=False)
     image_key = models.CharField(max_length=500, null=True, blank=True)
     image_url = models.URLField(max_length=1000, null=True, blank=True)
     creado_en = models.DateTimeField(auto_now_add=True)
