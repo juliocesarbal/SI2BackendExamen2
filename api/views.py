@@ -16,7 +16,7 @@ from .serializers import (
     UserSerializer, RoleSerializer, PermissionSerializer,
     MeSerializer, MarcaSerializer, CategoriaSerializer,
     UnidadSerializer, ProductoListSerializer, ProductoDetailSerializer,
-    ClienteSerializer, CarritoItemSerializer, OrdenSerializer,
+    CarritoItemSerializer, OrdenSerializer,
     LoteSerializer, AlertSerializer, BitacoraSerializer,
     PagoSerializer
 )
@@ -287,41 +287,49 @@ def user_detail(request, user_id):
 
 @api_view(['GET'])
 def list_clientes(request):
-    """List clients with pagination"""
+    """List clients (users with CLIENTE role) with pagination"""
     if not request.user:
         return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    queryset = Cliente.objects.all()
+    # Get users with CLIENTE role
+    try:
+        cliente_role = Role.objects.get(name='CLIENTE')
+        user_ids = UserRole.objects.filter(role=cliente_role).values_list('user_id', flat=True)
+        queryset = User.objects.filter(id__in=user_ids).order_by('-created_at')
+    except Role.DoesNotExist:
+        queryset = User.objects.none()
 
     # Search
     q = request.GET.get('q', '')
     if q:
         queryset = queryset.filter(
-            Q(nombre__icontains=q) |
-            Q(apellido__icontains=q) |
+            Q(first_name__icontains=q) |
+            Q(last_name__icontains=q) |
             Q(email__icontains=q) |
-            Q(nit__icontains=q)
+            Q(telefono__icontains=q)
         )
 
     # Filter by status
     status_filter = request.GET.get('status')
     if status_filter:
-        queryset = queryset.filter(activo=(status_filter.lower() == 'active'))
+        queryset = queryset.filter(status=status_filter.upper())
 
     # Pagination
     page = int(request.GET.get('page', 1))
     size = int(request.GET.get('size', 10))
     total = queryset.count()
+    total_pages = (total + size - 1) // size if total > 0 else 1
 
     start = (page - 1) * size
     end = start + size
-    clientes = queryset[start:end]
+    users = queryset[start:end]
 
-    serializer = ClienteSerializer(clientes, many=True)
+    serializer = UserSerializer(users, many=True)
 
     return Response({
-        'data': serializer.data,
+        'users': serializer.data,
         'total': total,
+        'totalPages': total_pages,
         'page': page,
         'size': size
     })
@@ -329,22 +337,28 @@ def list_clientes(request):
 
 @api_view(['GET'])
 def clientes_by_date_range(request):
-    """Get clients by date range"""
+    """Get clients (users with CLIENTE role) by date range"""
     if not request.user:
         return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
 
     fecha_inicial = request.GET.get('fechaInicial')
     fecha_final = request.GET.get('fechaFinal')
 
-    queryset = Cliente.objects.all()
+    # Get users with CLIENTE role
+    try:
+        cliente_role = Role.objects.get(name='CLIENTE')
+        user_ids = UserRole.objects.filter(role=cliente_role).values_list('user_id', flat=True)
+        queryset = User.objects.filter(id__in=user_ids).order_by('-created_at')
+    except Role.DoesNotExist:
+        queryset = User.objects.none()
 
     if fecha_inicial:
         queryset = queryset.filter(created_at__gte=fecha_inicial)
     if fecha_final:
         queryset = queryset.filter(created_at__lte=fecha_final)
 
-    serializer = ClienteSerializer(queryset, many=True)
-    return Response(serializer.data)
+    serializer = UserSerializer(queryset, many=True)
+    return Response({'clientes': serializer.data})
 
 
 # ============== ROLES & PERMISSIONS ==============
