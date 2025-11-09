@@ -79,4 +79,7 @@ urlpatterns = [
 
     # Chat AI
     path('chat-ai', views.chat_ai, name='chat_ai'),
+
+    # Voice Assistant
+    path('admin/voice-assistant', views.voice_assistant, name='voice_assistant'),
 ]

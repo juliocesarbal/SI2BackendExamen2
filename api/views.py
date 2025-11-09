@@ -1789,3 +1789,91 @@ def chat_ai(request):
             'message': 'Error al procesar el mensaje',
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def voice_assistant(request):
+    """Voice assistant endpoint for generating reports"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    from .utils import has_permission
+
+    # Check permissions
+    if not has_permission(request.user, 'user.read'):
+        return Response({'message': 'No tienes permisos para usar el asistente de voz'},
+                       status=status.HTTP_403_FORBIDDEN)
+
+    command = request.data.get('command', '').strip()
+    audio = request.data.get('audio')
+    mime_type = request.data.get('mimeType')
+
+    if not command and not (audio and mime_type):
+        return Response({'message': 'Debe proporcionar un comando de texto o audio'},
+                       status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        # Import voice assistant functions
+        from .voice_assistant_helpers import transcribe_audio_with_gemini, parse_command_with_gemini, process_date_filters
+
+        # If audio is provided, transcribe it first
+        if audio and mime_type:
+            print(f'[VoiceAssistant] Transcribing audio (mime: {mime_type})')
+            command = transcribe_audio_with_gemini(audio, mime_type)
+            print(f'[VoiceAssistant] Transcribed text: {command}')
+        from .voice_assistant_reports import (
+            generate_alertas_report,
+            generate_bitacora_report,
+            generate_clientes_report,
+            generate_facturas_report
+        )
+
+        # Parse command with Gemini
+        parsed_command = parse_command_with_gemini(command)
+
+        # Process filters
+        filters = process_date_filters(parsed_command.get('filters', {}))
+
+        # Generate report based on type
+        report_type = parsed_command['reportType']
+        format_type = parsed_command.get('format', 'PDF')
+
+        if report_type == 'ALERTAS':
+            result = generate_alertas_report(format_type, filters)
+        elif report_type == 'BITACORA':
+            result = generate_bitacora_report(format_type, filters)
+        elif report_type == 'CLIENTES':
+            result = generate_clientes_report(format_type, filters)
+        elif report_type == 'FACTURAS':
+            result = generate_facturas_report(format_type, filters)
+        else:
+            return Response({'message': 'Tipo de reporte no válido'},
+                           status=status.HTTP_400_BAD_REQUEST)
+
+        # Build response message
+        response_message = f'Reporte de {report_type} generado exitosamente en formato {format_type}.'
+
+        if not filters.get('fechaInicio') and not filters.get('fechaFin'):
+            response_message += f' Se exportaron TODOS los registros. Total: {len(result["data"])} registros.'
+        else:
+            response_message += f' Intervalo: {filters["fechaInicio"]} a {filters["fechaFin"]}. Total: {len(result["data"])} registros.'
+
+        return Response({
+            'response': response_message,
+            'action': 'generar_reporte',
+            'reportType': report_type,
+            'reportData': result['data'],
+            'fileData': result['fileData'],
+            'fileName': result['fileName'],
+            'mimeType': result['mimeType'],
+            'correctedCommand': f'Generar reporte de {report_type} en formato {format_type}',
+            'transcript': command  # Include the transcribed/provided command
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return Response({
+            'message': 'Error al procesar el comando',
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
