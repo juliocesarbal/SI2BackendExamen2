@@ -1163,10 +1163,10 @@ def create_pago(request):
 
     # Create Stripe checkout session
     try:
-        # Get frontend URL from environment or use default
-        frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+        # Always use production frontend URL for redirects
+        frontend_url = os.getenv('FRONTEND_URL', 'https://si-2-examen-2.vercel.app')
 
-        # Use custom URLs if provided, otherwise use default frontend URL
+        # Use custom URLs if provided, otherwise use production frontend URL
         success_url = custom_success_url if custom_success_url else f'{frontend_url}/success?session_id={{CHECKOUT_SESSION_ID}}'
         cancel_url = custom_cancel_url if custom_cancel_url else f'{frontend_url}/cancel'
 
