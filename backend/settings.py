@@ -143,10 +143,25 @@ REST_FRAMEWORK = {
 
 # CORS Settings
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:3000', cast=Csv())
+
+# Opción para permitir todos los orígenes (útil para desarrollo Flutter)
+ALLOW_ALL_CORS = config('ALLOW_ALL_CORS', default=DEBUG, cast=bool)
+
+if ALLOW_ALL_CORS:
+    # Permitir todos los orígenes para Flutter mobile y web
+    CORS_ALLOW_ALL_ORIGINS = True
+    # Permitir localhost con cualquier puerto para Flutter web debug
+    CORS_ALLOWED_ORIGIN_REGEXES = [
+        r"^http://localhost:\d+$",
+        r"^http://127\.0\.0\.1:\d+$",
+        r"^https://.*\.railway\.app$",  # Railway preview URLs
+    ]
+else:
+    # En producción estricta, usar la lista específica de orígenes permitidos
+    CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:3000', cast=Csv())
 
 # CSRF Settings
-CSRF_TRUSTED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:3000', cast=Csv())
+CSRF_TRUSTED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:3000,https://si-2-examen-2.vercel.app', cast=Csv())
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SAMESITE = 'Lax'
 # Disable CSRF for API endpoints (using token-based auth instead)
