@@ -221,26 +221,63 @@ class CarritoItemSerializer(serializers.ModelSerializer):
 # ============== ORDER SERIALIZERS ==============
 
 class OrdenItemSerializer(serializers.ModelSerializer):
-    producto = ProductoListSerializer(read_only=True)
+    productoId = serializers.IntegerField(source='producto.id', read_only=True)
+    precioUnitario = serializers.FloatField(source='precio_unitario', read_only=True)
+    subtotal = serializers.FloatField(read_only=True)
+    producto = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenItem
-        fields = ['id', 'producto', 'cantidad', 'precio_unitario', 'subtotal']
+        fields = ['id', 'productoId', 'cantidad', 'precioUnitario', 'subtotal', 'producto']
+
+    def get_producto(self, obj):
+        """Return producto in NestJS format"""
+        if obj.producto:
+            return {
+                'id': obj.producto.id,
+                'nombre': obj.producto.nombre,
+                'imageUrl': obj.producto.image_url
+            }
+        return None
 
 
 class OrdenSerializer(serializers.ModelSerializer):
+    total = serializers.FloatField(read_only=True)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    user = serializers.SerializerMethodField()
     items = OrdenItemSerializer(many=True, read_only=True)
-    user_email = serializers.EmailField(source='user.email', read_only=True)
-    user_name = serializers.SerializerMethodField()
+    pago = serializers.SerializerMethodField()
 
     class Meta:
         model = Orden
-        fields = ['id', 'user_id', 'user_email', 'user_name', 'total', 'estado',
-                  'created_at', 'updated_at', 'items']
-        read_only_fields = ['user_id']
+        fields = ['id', 'estado', 'total', 'createdAt', 'updatedAt', 'user', 'items', 'pago']
 
-    def get_user_name(self, obj):
-        return f"{obj.user.first_name} {obj.user.last_name}".strip() or obj.user.email
+    def get_user(self, obj):
+        """Return user in NestJS format"""
+        return {
+            'id': obj.user.id,
+            'firstName': obj.user.first_name,
+            'lastName': obj.user.last_name,
+            'email': obj.user.email
+        }
+
+    def get_pago(self, obj):
+        """Return pago in NestJS format (OneToOne relationship)"""
+        try:
+            if hasattr(obj, 'pago') and obj.pago:
+                pago = obj.pago
+                return {
+                    'id': pago.id,
+                    'estado': pago.estado,
+                    'monto': float(pago.monto),
+                    'metodo': pago.metodo,
+                    'facturaUrl': pago.factura_url,
+                    'createdAt': pago.created_at
+                }
+        except Exception:
+            pass
+        return None
 
 
 # ============== INVENTORY SERIALIZERS ==============

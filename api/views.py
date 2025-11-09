@@ -609,39 +609,141 @@ def clear_cart(request):
 
 @api_view(['GET'])
 def list_ordenes(request):
-    """List all orders (admin) or user's orders"""
+    """List all orders with advanced filters (based on NestJS pedidos service)"""
     if not request.user:
         return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
 
     from .utils import has_permission
 
-    # Si tiene permiso admin, mostrar todas las órdenes
+    # Base queryset según permisos
     if has_permission(request.user, 'order.read'):
-        ordenes = Orden.objects.all().select_related('user').prefetch_related('items__producto').order_by('-created_at')
+        queryset = Orden.objects.all()
     else:
-        ordenes = Orden.objects.filter(user=request.user).prefetch_related('items__producto').order_by('-created_at')
+        queryset = Orden.objects.filter(user=request.user)
+
+    # Filtro por estado
+    status_filter = request.GET.get('status')
+    if status_filter:
+        queryset = queryset.filter(estado=status_filter)
+
+    # Filtro por rango de fechas
+    from_date = request.GET.get('from')
+    to_date = request.GET.get('to')
+    if from_date:
+        queryset = queryset.filter(created_at__gte=from_date)
+    if to_date:
+        queryset = queryset.filter(created_at__lte=to_date)
+
+    # Búsqueda por texto (ID, usuario, email, producto)
+    search = request.GET.get('search', '').strip()
+    if search:
+        # Intentar convertir a número para buscar por ID
+        try:
+            numeric_id = int(search)
+            queryset = queryset.filter(
+                Q(id=numeric_id) |
+                Q(user__first_name__icontains=search) |
+                Q(user__last_name__icontains=search) |
+                Q(user__email__icontains=search) |
+                Q(items__producto__nombre__icontains=search)
+            ).distinct()
+        except ValueError:
+            # No es un número, buscar solo por texto
+            queryset = queryset.filter(
+                Q(user__first_name__icontains=search) |
+                Q(user__last_name__icontains=search) |
+                Q(user__email__icontains=search) |
+                Q(items__producto__nombre__icontains=search)
+            ).distinct()
+
+    # Paginación
+    page = int(request.GET.get('page', 1))
+    page_size = int(request.GET.get('pageSize', 10))
+    page_size = min(page_size, 100)  # Máximo 100 items por página
+
+    total = queryset.count()
+    total_pages = max(1, (total + page_size - 1) // page_size) if total > 0 else 1
+
+    start = (page - 1) * page_size
+    end = start + page_size
+
+    # Obtener órdenes con todas las relaciones (order_by BEFORE slice)
+    ordenes = queryset.select_related('user', 'pago').prefetch_related('items__producto').order_by('-created_at')[start:end]
 
     serializer = OrdenSerializer(ordenes, many=True)
-    return Response(serializer.data)
+
+    return Response({
+        'items': serializer.data,
+        'total': total,
+        'page': page,
+        'pageSize': page_size,
+        'totalPages': total_pages
+    })
 
 
 @api_view(['GET'])
 def get_orden(request, orden_id):
-    """Get order detail"""
+    """Get order detail with all relations (based on NestJS findOne)"""
     if not request.user:
         return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
 
     try:
         from .utils import has_permission
-        if has_permission(request.user, 'order.read'):
-            orden = Orden.objects.get(id=orden_id)
-        else:
-            orden = Orden.objects.get(id=orden_id, user=request.user)
 
-        orden_data = OrdenSerializer(orden).data
-        return Response(orden_data)
+        # Query con todas las relaciones cargadas
+        queryset = Orden.objects.select_related('user', 'pago').prefetch_related('items__producto')
+
+        if has_permission(request.user, 'order.read'):
+            orden = queryset.get(id=orden_id)
+        else:
+            orden = queryset.get(id=orden_id, user=request.user)
+
+        serializer = OrdenSerializer(orden)
+        return Response(serializer.data)
     except Orden.DoesNotExist:
-        return Response({'message': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'message': 'Pedido no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['PATCH'])
+def update_orden_status(request, orden_id):
+    """Update order status (requires order.update permission)"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    from .utils import has_permission
+
+    # Verificar permisos
+    if not has_permission(request.user, 'order.update'):
+        return Response({'message': 'No tienes permisos para actualizar pedidos'},
+                       status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        orden = Orden.objects.select_related('user', 'pago').prefetch_related('items__producto').get(id=orden_id)
+    except Orden.DoesNotExist:
+        return Response({'message': 'Pedido no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Obtener y validar el nuevo estado
+    nuevo_estado = request.data.get('estado')
+    if not nuevo_estado:
+        return Response({'message': 'El campo estado es requerido'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Validar que el estado sea válido
+    estados_validos = [choice[0] for choice in EstadoOrden.choices]
+    if nuevo_estado not in estados_validos:
+        return Response({
+            'message': f'Estado inválido. Debe ser uno de: {", ".join(estados_validos)}'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    # Actualizar el estado
+    orden.estado = nuevo_estado
+    orden.save()
+
+    # Log de auditoría
+    log_ok(request, f'Estado de pedido #{orden_id} actualizado a {nuevo_estado}')
+
+    # Retornar la orden actualizada
+    serializer = OrdenSerializer(orden)
+    return Response(serializer.data)
 
 
 @api_view(['POST'])

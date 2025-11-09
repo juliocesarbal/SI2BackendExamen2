@@ -40,6 +40,7 @@ urlpatterns = [
     # Orders
     path('ordenes', views.list_ordenes, name='list_ordenes'),
     path('ordenes/<int:orden_id>', views.get_orden, name='get_orden'),
+    path('ordenes/<int:orden_id>/estado', views.update_orden_status, name='update_orden_status'),
 
     # Categories, Brands & Units
     path('categorias', views.categorias, name='categorias'),
