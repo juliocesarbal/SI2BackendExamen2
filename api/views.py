@@ -22,6 +22,7 @@ from .serializers import (
 )
 from .utils import create_auth_token, get_client_ip, get_user_permissions
 from django.conf import settings
+from datetime import datetime, timedelta
 import stripe
 import os
 
@@ -1126,15 +1127,325 @@ def delete_lote(request, lote_id):
 
 # ============== ALERTS ==============
 
+SEVERITY_WEIGHT = {
+    'CRITICAL': 3,
+    'WARNING': 2,
+    'INFO': 1,
+}
+
+DEFAULT_WINDOW_DAYS = int(os.environ.get('ALERT_WINDOW_DAYS', '30'))
+
+
+def evaluate_stock_alert(producto):
+    """Evaluate if a product needs a stock alert"""
+    actual = producto.stock_actual or 0
+    minimo = producto.stock_minimo or 0
+
+    if actual <= 0:
+        return {
+            'severity': 'CRITICAL',
+            'mensaje': 'Sin stock disponible',
+            'stock_actual': actual,
+            'stock_minimo': minimo
+        }
+
+    if actual <= minimo:
+        return {
+            'severity': 'WARNING',
+            'mensaje': f'Stock bajo ({actual}/{minimo})',
+            'stock_actual': actual,
+            'stock_minimo': minimo
+        }
+
+    return None
+
+
+def evaluate_expiry_alert(lote, window_days):
+    """Evaluate if a lote needs an expiry alert"""
+    if not lote.fecha_venc or lote.cantidad <= 0:
+        return None
+
+    now = datetime.now().date()
+    fecha_venc = lote.fecha_venc.date() if isinstance(lote.fecha_venc, datetime) else lote.fecha_venc
+    days_until = (fecha_venc - now).days
+
+    # Solo alertar si está dentro del doble de la ventana
+    if days_until > window_days * 2:
+        return None
+
+    if days_until <= 3:
+        mensaje = f'Lote vencido hace {abs(days_until)} día(s)' if days_until < 0 else f'Lote vence en {days_until} día(s)'
+        return {
+            'severity': 'CRITICAL',
+            'mensaje': mensaje,
+            'days_until': days_until
+        }
+
+    if days_until <= window_days:
+        return {
+            'severity': 'WARNING',
+            'mensaje': f'Lote vence en {days_until} día(s)',
+            'days_until': days_until
+        }
+
+    if days_until <= window_days * 2:
+        return {
+            'severity': 'INFO',
+            'mensaje': f'Lote vence en {days_until} día(s)',
+            'days_until': days_until
+        }
+
+    return None
+
+
+def sync_stock_alerts():
+    """Synchronize stock alerts for all products"""
+    from django.utils import timezone
+
+    productos = Producto.objects.all().select_related('marca', 'categoria')
+    active_alerts = Alert.objects.filter(type='STOCK_BAJO', resolved_at__isnull=True).select_related('producto')
+
+    # Map de alertas activas por producto_id
+    active_map = {alert.producto_id: alert for alert in active_alerts}
+
+    created_count = 0
+    updated_count = 0
+    resolved_count = 0
+    seen_products = set()
+
+    for producto in productos:
+        seen_products.add(producto.id)
+        evaluation = evaluate_stock_alert(producto)
+        existing = active_map.get(producto.id)
+
+        # Si no necesita alerta pero existe una activa, resolverla
+        if not evaluation:
+            if existing:
+                existing.resolved_at = timezone.now()
+                existing.save()
+                resolved_count += 1
+            continue
+
+        # Si no existe, crearla
+        if not existing:
+            Alert.objects.create(
+                type='STOCK_BAJO',
+                producto=producto,
+                mensaje=evaluation['mensaje'],
+                severity=evaluation['severity'],
+                stock_actual=evaluation['stock_actual'],
+                stock_minimo=evaluation['stock_minimo'],
+                window_dias=DEFAULT_WINDOW_DAYS
+            )
+            created_count += 1
+            continue
+
+        # Si existe, verificar si necesita actualizarse
+        severity_changed = existing.severity != evaluation['severity']
+        message_changed = existing.mensaje != evaluation['mensaje']
+        stock_changed = (existing.stock_actual != evaluation['stock_actual'] or
+                        existing.stock_minimo != evaluation['stock_minimo'])
+
+        if severity_changed or message_changed or stock_changed:
+            existing.severity = evaluation['severity']
+            existing.mensaje = evaluation['mensaje']
+            existing.stock_actual = evaluation['stock_actual']
+            existing.stock_minimo = evaluation['stock_minimo']
+
+            # Si la severidad aumentó, marcar como no leída
+            if severity_changed and SEVERITY_WEIGHT[evaluation['severity']] > SEVERITY_WEIGHT[existing.severity]:
+                existing.leida = False
+
+            existing.save()
+            updated_count += 1
+
+    # Resolver alertas de productos que ya no existen
+    for alert in active_alerts:
+        if alert.producto_id not in seen_products:
+            alert.resolved_at = timezone.now()
+            alert.save()
+            resolved_count += 1
+
+    return {'created': created_count, 'updated': updated_count, 'resolved': resolved_count}
+
+
+def sync_expiry_alerts(window_days=None):
+    """Synchronize expiry alerts for all lotes"""
+    from django.utils import timezone
+
+    if window_days is None:
+        window_days = DEFAULT_WINDOW_DAYS
+
+    now = datetime.now().date()
+    max_date = now + timedelta(days=window_days * 2)
+
+    lotes = Lote.objects.filter(
+        fecha_venc__lte=max_date
+    ).select_related('producto', 'producto__marca', 'producto__categoria')
+
+    active_alerts = Alert.objects.filter(type='VENCIMIENTO', resolved_at__isnull=True).select_related('producto', 'lote')
+
+    # Map de alertas activas por lote_id
+    active_map = {alert.lote_id: alert for alert in active_alerts if alert.lote_id}
+
+    created_count = 0
+    updated_count = 0
+    resolved_count = 0
+    seen_lotes = set()
+
+    for lote in lotes:
+        seen_lotes.add(lote.id)
+        evaluation = evaluate_expiry_alert(lote, window_days)
+        existing = active_map.get(lote.id)
+
+        # Si no necesita alerta pero existe una activa, resolverla
+        if not evaluation:
+            if existing:
+                existing.resolved_at = timezone.now()
+                existing.save()
+                resolved_count += 1
+            continue
+
+        # Si no existe, crearla
+        if not existing:
+            Alert.objects.create(
+                type='VENCIMIENTO',
+                producto=lote.producto,
+                lote=lote,
+                mensaje=evaluation['mensaje'],
+                severity=evaluation['severity'],
+                vence_en_dias=evaluation['days_until'],
+                stock_actual=lote.producto.stock_actual,
+                stock_minimo=lote.producto.stock_minimo,
+                window_dias=window_days
+            )
+            created_count += 1
+            continue
+
+        # Si existe, verificar si necesita actualizarse
+        severity_changed = existing.severity != evaluation['severity']
+        message_changed = existing.mensaje != evaluation['mensaje']
+        days_changed = existing.vence_en_dias != evaluation['days_until']
+
+        if severity_changed or message_changed or days_changed:
+            existing.severity = evaluation['severity']
+            existing.mensaje = evaluation['mensaje']
+            existing.vence_en_dias = evaluation['days_until']
+
+            # Si la severidad aumentó, marcar como no leída
+            if severity_changed and SEVERITY_WEIGHT[evaluation['severity']] > SEVERITY_WEIGHT[existing.severity]:
+                existing.leida = False
+
+            existing.save()
+            updated_count += 1
+
+    # Resolver alertas de lotes que ya no existen o no tienen fecha_venc
+    for alert in active_alerts:
+        if alert.lote_id and alert.lote_id not in seen_lotes:
+            alert.resolved_at = timezone.now()
+            alert.save()
+            resolved_count += 1
+
+    return {'created': created_count, 'updated': updated_count, 'resolved': resolved_count}
+
+
 @api_view(['GET'])
 def list_alerts(request):
-    """Get all alerts"""
+    """Get all alerts with advanced filters and pagination"""
     if not request.user:
         return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    alerts = Alert.objects.all().select_related('producto').order_by('-created_at')
+    from .utils import has_permission
+
+    if not has_permission(request.user, 'alert.read'):
+        return Response({'message': 'No tienes permisos para ver alertas'},
+                       status=status.HTTP_403_FORBIDDEN)
+
+    # Sincronizar alertas antes de listar
+    window_days = int(request.GET.get('windowDays', DEFAULT_WINDOW_DAYS))
+    sync_stock_alerts()
+    sync_expiry_alerts(window_days)
+
+    # Filtros
+    queryset = Alert.objects.filter(resolved_at__isnull=True)
+
+    # Filtro por tipo
+    alert_type = request.GET.get('type')
+    if alert_type == 'stock':
+        queryset = queryset.filter(type='STOCK_BAJO')
+    elif alert_type == 'expiry':
+        queryset = queryset.filter(type='VENCIMIENTO')
+
+    # Filtro por severidad
+    severity = request.GET.get('severity')
+    if severity and severity.upper() in ['INFO', 'WARNING', 'CRITICAL']:
+        queryset = queryset.filter(severity=severity.upper())
+
+    # Filtro solo no leídas
+    unread_only = request.GET.get('unreadOnly', '').lower() == 'true'
+    if unread_only:
+        queryset = queryset.filter(leida=False)
+
+    # Búsqueda por texto
+    search = request.GET.get('search', '').strip()
+    if search:
+        queryset = queryset.filter(
+            Q(producto__nombre__icontains=search) |
+            Q(producto__categoria__nombre__icontains=search) |
+            Q(producto__marca__nombre__icontains=search)
+        )
+
+    # Filtrar alertas de vencimiento dentro de la ventana
+    if alert_type != 'stock':
+        queryset = queryset.filter(
+            Q(type='STOCK_BAJO') |
+            Q(type='VENCIMIENTO', vence_en_dias__lte=window_days * 2)
+        )
+
+    # Contar no leídas
+    unread_count = queryset.filter(leida=False).count()
+
+    # Paginación
+    page = int(request.GET.get('page', 1))
+    page_size = int(request.GET.get('pageSize', 20))
+    page_size = min(page_size, 100)  # Máximo 100 items por página
+
+    # Ordenamiento
+    queryset = queryset.order_by(
+        '-severity',  # CRITICAL, WARNING, INFO
+        'vence_en_dias',  # Más cercanos primero
+        'stock_actual',  # Menor stock primero
+        '-created_at'
+    )
+
+    # Total antes de paginar
+    total = queryset.count()
+    total_pages = max(1, (total + page_size - 1) // page_size) if total > 0 else 1
+
+    # Aplicar paginación
+    start = (page - 1) * page_size
+    end = start + page_size
+
+    # Obtener alertas con relaciones
+    alerts = queryset.select_related(
+        'producto',
+        'producto__marca',
+        'producto__categoria',
+        'lote'
+    )[start:end]
+
     serializer = AlertSerializer(alerts, many=True)
-    return Response(serializer.data)
+
+    return Response({
+        'data': serializer.data,
+        'meta': {
+            'total': total,
+            'page': page,
+            'pageSize': page_size,
+            'totalPages': total_pages,
+            'unread': unread_count
+        }
+    })
 
 
 @api_view(['PATCH'])
@@ -1143,14 +1454,31 @@ def mark_alert_read(request, alert_id):
     if not request.user:
         return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
 
+    from .utils import has_permission
+
+    if not has_permission(request.user, 'alert.update'):
+        return Response({'message': 'No tienes permisos para actualizar alertas'},
+                       status=status.HTTP_403_FORBIDDEN)
+
     try:
-        alert = Alert.objects.get(id=alert_id)
+        alert = Alert.objects.select_related(
+            'producto',
+            'producto__marca',
+            'producto__categoria',
+            'lote'
+        ).get(id=alert_id, resolved_at__isnull=True)
+
+        if alert.leida:
+            # Ya está leída, solo devolver
+            serializer = AlertSerializer(alert)
+            return Response(serializer.data)
+
         alert.leida = True
         alert.save()
         serializer = AlertSerializer(alert)
         return Response(serializer.data)
     except Alert.DoesNotExist:
-        return Response({'message': 'Alert not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'message': 'Alerta no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
 
 @api_view(['PATCH'])
@@ -1159,8 +1487,23 @@ def mark_all_alerts_read(request):
     if not request.user:
         return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    Alert.objects.filter(leida=False).update(leida=True)
-    return Response({'message': 'All alerts marked as read'})
+    from .utils import has_permission
+
+    if not has_permission(request.user, 'alert.update'):
+        return Response({'message': 'No tienes permisos para actualizar alertas'},
+                       status=status.HTTP_403_FORBIDDEN)
+
+    # Filtro opcional por tipo
+    alert_type = request.GET.get('type')
+    queryset = Alert.objects.filter(leida=False, resolved_at__isnull=True)
+
+    if alert_type == 'stock':
+        queryset = queryset.filter(type='STOCK_BAJO')
+    elif alert_type == 'expiry':
+        queryset = queryset.filter(type='VENCIMIENTO')
+
+    updated_count = queryset.update(leida=True)
+    return Response({'updated': updated_count})
 
 
 # ============== AUDIT LOG ==============

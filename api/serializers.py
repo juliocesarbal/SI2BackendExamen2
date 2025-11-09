@@ -292,11 +292,47 @@ class LoteSerializer(serializers.ModelSerializer):
 # ============== ALERT SERIALIZERS ==============
 
 class AlertSerializer(serializers.ModelSerializer):
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    resolvedAt = serializers.DateTimeField(source='resolved_at', read_only=True, allow_null=True)
+    venceEnDias = serializers.IntegerField(source='vence_en_dias', read_only=True, allow_null=True)
+    stockActual = serializers.IntegerField(source='stock_actual', read_only=True, allow_null=True)
+    stockMinimo = serializers.IntegerField(source='stock_minimo', read_only=True, allow_null=True)
+    windowDias = serializers.IntegerField(source='window_dias', read_only=True)
+    producto = serializers.SerializerMethodField()
+    lote = serializers.SerializerMethodField()
+
     class Meta:
         model = Alert
-        fields = ['id', 'type', 'producto_id', 'lote_id', 'mensaje', 'severity',
-                  'vence_en_dias', 'stock_actual', 'stock_minimo', 'window_dias',
-                  'leida', 'resolved_at', 'created_at', 'updated_at']
+        fields = ['id', 'type', 'severity', 'mensaje', 'venceEnDias', 'stockActual',
+                  'stockMinimo', 'windowDias', 'leida', 'createdAt', 'resolvedAt',
+                  'producto', 'lote']
+
+    def get_producto(self, obj):
+        """Return producto with nested relationships"""
+        if not obj.producto:
+            return None
+
+        producto = obj.producto
+        return {
+            'id': producto.id,
+            'nombre': producto.nombre,
+            'marca': producto.marca.nombre if producto.marca else None,
+            'categoria': producto.categoria.nombre if producto.categoria else None,
+            'stockActual': producto.stock_actual,
+            'stockMinimo': producto.stock_minimo,
+        }
+
+    def get_lote(self, obj):
+        """Return lote info if exists"""
+        if not obj.lote:
+            return None
+
+        return {
+            'id': obj.lote.id,
+            'codigo': obj.lote.codigo,
+            'cantidad': obj.lote.cantidad,
+            'fechaVenc': obj.lote.fecha_venc.isoformat() if obj.lote.fecha_venc else None
+        }
 
 
 # ============== AUDIT LOG SERIALIZERS ==============
