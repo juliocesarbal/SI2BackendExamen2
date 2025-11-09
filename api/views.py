@@ -1152,6 +1152,10 @@ def create_pago(request):
     monto = request.data.get('monto')
     moneda = request.data.get('moneda', 'usd')
 
+    # Allow custom success/cancel URLs (useful for mobile)
+    custom_success_url = request.data.get('successUrl')
+    custom_cancel_url = request.data.get('cancelUrl')
+
     try:
         orden = Orden.objects.get(id=orden_id, user=request.user)
     except Orden.DoesNotExist:
@@ -1161,6 +1165,10 @@ def create_pago(request):
     try:
         # Get frontend URL from environment or use default
         frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+
+        # Use custom URLs if provided, otherwise use default frontend URL
+        success_url = custom_success_url if custom_success_url else f'{frontend_url}/success?session_id={{CHECKOUT_SESSION_ID}}'
+        cancel_url = custom_cancel_url if custom_cancel_url else f'{frontend_url}/cancel'
 
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
@@ -1175,8 +1183,8 @@ def create_pago(request):
                 'quantity': 1,
             }],
             mode='payment',
-            success_url=f'{frontend_url}/success?session_id={{CHECKOUT_SESSION_ID}}',
-            cancel_url=f'{frontend_url}/cancel',
+            success_url=success_url,
+            cancel_url=cancel_url,
         )
 
         # Save payment info
