@@ -249,9 +249,15 @@ class OrdenSerializer(serializers.ModelSerializer):
     items = OrdenItemSerializer(many=True, read_only=True)
     pago = serializers.SerializerMethodField()
 
+    # Campos adicionales para la vista de facturas del admin
+    user_id = serializers.IntegerField(source='user.id', read_only=True)
+    user_email = serializers.EmailField(source='user.email', read_only=True)
+    user_name = serializers.SerializerMethodField()
+
     class Meta:
         model = Orden
-        fields = ['id', 'estado', 'total', 'createdAt', 'updatedAt', 'user', 'items', 'pago']
+        fields = ['id', 'estado', 'total', 'createdAt', 'updatedAt', 'user', 'user_id',
+                  'user_email', 'user_name', 'items', 'pago']
 
     def get_user(self, obj):
         """Return user in NestJS format"""
@@ -261,6 +267,10 @@ class OrdenSerializer(serializers.ModelSerializer):
             'lastName': obj.user.last_name,
             'email': obj.user.email
         }
+
+    def get_user_name(self, obj):
+        """Return full name of the user"""
+        return f"{obj.user.first_name} {obj.user.last_name}"
 
     def get_pago(self, obj):
         """Return pago in NestJS format (OneToOne relationship)"""
