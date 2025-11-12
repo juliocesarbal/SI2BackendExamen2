@@ -347,3 +347,56 @@ class Pago(models.Model):
 
     def __str__(self):
         return f"Pago #{self.id} - Orden #{self.orden.id}"
+
+
+# ============== SALES ANALYTICS & PREDICTIONS ==============
+
+class ModelMetrics(models.Model):
+    """Store ML model training metrics"""
+    model_name = models.CharField(max_length=100, default='RandomForestRegressor')
+    rmse = models.FloatField(null=True, blank=True)  # Root Mean Squared Error
+    r2_score = models.FloatField(null=True, blank=True)  # R² Score
+    mae = models.FloatField(null=True, blank=True)  # Mean Absolute Error
+    training_samples = models.IntegerField(default=0)  # Number of samples used for training
+    features_used = models.JSONField(default=list)  # List of features used
+    model_path = models.CharField(max_length=500)  # Path to serialized model file
+    trained_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)  # Only one active model at a time
+
+    class Meta:
+        db_table = 'model_metrics'
+        ordering = ['-trained_at']
+        indexes = [
+            models.Index(fields=['is_active', '-trained_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.model_name} - R²: {self.r2_score:.3f} ({self.trained_at})"
+
+
+class SalesPrediction(models.Model):
+    """Store individual sales predictions"""
+    model_metrics = models.ForeignKey(ModelMetrics, on_delete=models.CASCADE, related_name='predictions')
+    prediction_date = models.DateField()  # Date for which prediction is made
+    predicted_amount = models.DecimalField(max_digits=10, decimal_places=2)  # Predicted sales amount
+    predicted_quantity = models.IntegerField(null=True, blank=True)  # Predicted quantity of items
+    categoria = models.ForeignKey(Categoria, on_delete=models.SET_NULL, null=True, blank=True, related_name='predictions')
+    producto = models.ForeignKey(Producto, on_delete=models.SET_NULL, null=True, blank=True, related_name='predictions')
+    actual_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)  # Real sales (filled later)
+    actual_quantity = models.IntegerField(null=True, blank=True)  # Real quantity (filled later)
+    confidence_interval_lower = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    confidence_interval_upper = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'sales_prediction'
+        ordering = ['prediction_date']
+        indexes = [
+            models.Index(fields=['prediction_date', 'categoria']),
+            models.Index(fields=['prediction_date', 'producto']),
+            models.Index(fields=['model_metrics', 'prediction_date']),
+        ]
+
+    def __str__(self):
+        target = self.categoria.nombre if self.categoria else (self.producto.nombre if self.producto else 'Total')
+        return f"Predicción {self.prediction_date} - {target}: ${self.predicted_amount}"

@@ -82,4 +82,13 @@ urlpatterns = [
 
     # Voice Assistant
     path('admin/voice-assistant', views.voice_assistant, name='voice_assistant'),
+
+    # Analytics & Predictions
+    path('analytics/sales/historical', views.sales_historical, name='sales_historical'),
+    path('analytics/sales/by-period', views.sales_by_period, name='sales_by_period'),
+    path('analytics/sales/by-category', views.sales_by_category, name='sales_by_category'),
+    path('analytics/sales/by-product', views.sales_by_product, name='sales_by_product'),
+    path('analytics/model/train', views.train_prediction_model, name='train_prediction_model'),
+    path('analytics/predictions', views.get_predictions, name='get_predictions'),
+    path('analytics/model/status', views.model_status, name='model_status'),
 ]

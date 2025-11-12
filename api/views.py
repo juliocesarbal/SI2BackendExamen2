@@ -10,7 +10,8 @@ from .models import (
     User, Role, Permission, UserRole, RolePermission,
     Marca, Categoria, Unidad, Producto, Cliente,
     CarritoItem, Orden, OrdenItem, Lote, Alert,
-    Bitacora, Pago, EstadoBitacora, EstadoOrden
+    Bitacora, Pago, EstadoBitacora, EstadoOrden,
+    ModelMetrics, SalesPrediction
 )
 from .serializers import (
     UserSerializer, RoleSerializer, PermissionSerializer,
@@ -18,7 +19,7 @@ from .serializers import (
     UnidadSerializer, ProductoListSerializer, ProductoDetailSerializer,
     CarritoItemSerializer, OrdenSerializer,
     LoteSerializer, AlertSerializer, BitacoraSerializer,
-    PagoSerializer
+    PagoSerializer, ModelMetricsSerializer, SalesPredictionSerializer
 )
 from .utils import create_auth_token, get_client_ip, get_user_permissions
 from django.conf import settings
@@ -1877,3 +1878,349 @@ def voice_assistant(request):
             'message': 'Error al procesar el comando',
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============== ANALYTICS & PREDICTIONS ==============
+
+@api_view(['GET'])
+def sales_historical(request):
+    """Get historical sales data with optional filters"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    from .utils import has_permission
+    if not has_permission(request.user, 'order.read'):
+        return Response({'message': 'No permission'}, status=status.HTTP_403_FORBIDDEN)
+
+    from django.db.models import Sum, Count, Avg, F
+    from datetime import datetime, timedelta
+
+    # Get filter parameters
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+    categoria_id = request.GET.get('categoria_id')
+    producto_id = request.GET.get('producto_id')
+    user_id = request.GET.get('user_id')
+    group_by = request.GET.get('group_by', 'day')  # day, week, month
+
+    # Base queryset - only completed orders
+    orders = Orden.objects.filter(estado='COMPLETADO')
+
+    # Apply date filters
+    if start_date:
+        orders = orders.filter(created_at__gte=start_date)
+    if end_date:
+        orders = orders.filter(created_at__lte=end_date)
+    if user_id:
+        orders = orders.filter(user_id=user_id)
+
+    # Get order items
+    items = OrdenItem.objects.filter(orden__in=orders).select_related('producto', 'producto__categoria')
+
+    # Apply product/category filters
+    if categoria_id:
+        items = items.filter(producto__categoria_id=categoria_id)
+    if producto_id:
+        items = items.filter(producto_id=producto_id)
+
+    # Prepare data for response
+    data = []
+    for item in items:
+        data.append({
+            'fecha': item.orden.created_at.date().isoformat(),
+            'orden_id': item.orden.id,
+            'producto_id': item.producto.id,
+            'producto_nombre': item.producto.nombre,
+            'categoria_id': item.producto.categoria.id if item.producto.categoria else None,
+            'categoria_nombre': item.producto.categoria.nombre if item.producto.categoria else None,
+            'cantidad': item.cantidad,
+            'precio_unitario': float(item.precio_unitario),
+            'subtotal': float(item.subtotal),
+            'user_id': item.orden.user_id,
+        })
+
+    return Response({
+        'success': True,
+        'count': len(data),
+        'data': data
+    })
+
+
+@api_view(['GET'])
+def sales_by_period(request):
+    """Get sales aggregated by period (day, week, month)"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    from .utils import has_permission
+    if not has_permission(request.user, 'order.read'):
+        return Response({'message': 'No permission'}, status=status.HTTP_403_FORBIDDEN)
+
+    from django.db.models import Sum, Count
+    from django.db.models.functions import TruncDate, TruncWeek, TruncMonth
+
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+    period = request.GET.get('period', 'day')  # day, week, month
+
+    orders = Orden.objects.filter(estado='COMPLETADO')
+
+    if start_date:
+        orders = orders.filter(created_at__gte=start_date)
+    if end_date:
+        orders = orders.filter(created_at__lte=end_date)
+
+    # Group by period
+    if period == 'week':
+        trunc_func = TruncWeek('created_at')
+    elif period == 'month':
+        trunc_func = TruncMonth('created_at')
+    else:
+        trunc_func = TruncDate('created_at')
+
+    sales_data = orders.annotate(
+        period_date=trunc_func
+    ).values('period_date').annotate(
+        total_ventas=Sum('total'),
+        num_ordenes=Count('id')
+    ).order_by('period_date')
+
+    data = [{
+        'fecha': item['period_date'].isoformat(),
+        'total_ventas': float(item['total_ventas']),
+        'num_ordenes': item['num_ordenes']
+    } for item in sales_data]
+
+    return Response({
+        'success': True,
+        'period': period,
+        'count': len(data),
+        'data': data
+    })
+
+
+@api_view(['GET'])
+def sales_by_category(request):
+    """Get sales by category"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    from .utils import has_permission
+    if not has_permission(request.user, 'order.read'):
+        return Response({'message': 'No permission'}, status=status.HTTP_403_FORBIDDEN)
+
+    from django.db.models import Sum, Count
+
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+
+    orders = Orden.objects.filter(estado='COMPLETADO')
+
+    if start_date:
+        orders = orders.filter(created_at__gte=start_date)
+    if end_date:
+        orders = orders.filter(created_at__lte=end_date)
+
+    items = OrdenItem.objects.filter(orden__in=orders).select_related('producto__categoria')
+
+    sales_by_cat = items.values(
+        'producto__categoria__id',
+        'producto__categoria__nombre'
+    ).annotate(
+        total_ventas=Sum('subtotal'),
+        cantidad_vendida=Sum('cantidad'),
+        num_productos=Count('producto', distinct=True)
+    ).order_by('-total_ventas')
+
+    data = [{
+        'categoria_id': item['producto__categoria__id'],
+        'categoria_nombre': item['producto__categoria__nombre'] or 'Sin categoría',
+        'total_ventas': float(item['total_ventas']),
+        'cantidad_vendida': item['cantidad_vendida'],
+        'num_productos': item['num_productos']
+    } for item in sales_by_cat]
+
+    return Response({
+        'success': True,
+        'count': len(data),
+        'data': data
+    })
+
+
+@api_view(['GET'])
+def sales_by_product(request):
+    """Get sales by product (top products)"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    from .utils import has_permission
+    if not has_permission(request.user, 'order.read'):
+        return Response({'message': 'No permission'}, status=status.HTTP_403_FORBIDDEN)
+
+    from django.db.models import Sum, Count
+
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+    limit = int(request.GET.get('limit', 10))
+
+    orders = Orden.objects.filter(estado='COMPLETADO')
+
+    if start_date:
+        orders = orders.filter(created_at__gte=start_date)
+    if end_date:
+        orders = orders.filter(created_at__lte=end_date)
+
+    items = OrdenItem.objects.filter(orden__in=orders).select_related('producto', 'producto__categoria')
+
+    sales_by_prod = items.values(
+        'producto__id',
+        'producto__nombre',
+        'producto__categoria__nombre'
+    ).annotate(
+        total_ventas=Sum('subtotal'),
+        cantidad_vendida=Sum('cantidad'),
+        num_ordenes=Count('orden', distinct=True)
+    ).order_by('-total_ventas')[:limit]
+
+    data = [{
+        'producto_id': item['producto__id'],
+        'producto_nombre': item['producto__nombre'],
+        'categoria_nombre': item['producto__categoria__nombre'] or 'Sin categoría',
+        'total_ventas': float(item['total_ventas']),
+        'cantidad_vendida': item['cantidad_vendida'],
+        'num_ordenes': item['num_ordenes']
+    } for item in sales_by_prod]
+
+    return Response({
+        'success': True,
+        'count': len(data),
+        'data': data
+    })
+
+
+@api_view(['POST'])
+def train_prediction_model(request):
+    """Train the sales prediction model"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    from .utils import has_permission
+    if not has_permission(request.user, 'user.read'):  # Only admins can train
+        return Response({'message': 'No permission'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        from .ml_model import train_and_save_model
+
+        result = train_and_save_model()
+
+        from .serializers import ModelMetricsSerializer
+        metrics_serializer = ModelMetricsSerializer(result['model_metrics'])
+
+        return Response({
+            'success': True,
+            'message': result['message'],
+            'model_metrics': metrics_serializer.data,
+            'predictions_generated': result['predictions_generated']
+        })
+
+    except ValueError as e:
+        return Response({
+            'success': False,
+            'message': str(e)
+        }, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return Response({
+            'success': False,
+            'message': 'Error al entrenar el modelo',
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_predictions(request):
+    """Get sales predictions"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    from .utils import has_permission
+    if not has_permission(request.user, 'order.read'):
+        return Response({'message': 'No permission'}, status=status.HTTP_403_FORBIDDEN)
+
+    from .serializers import SalesPredictionSerializer
+    from datetime import datetime
+
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+    categoria_id = request.GET.get('categoria_id')
+
+    # Get active model's predictions
+    try:
+        from .models import ModelMetrics
+        active_model = ModelMetrics.objects.filter(is_active=True).latest('trained_at')
+        predictions = SalesPrediction.objects.filter(model_metrics=active_model)
+
+        if start_date:
+            predictions = predictions.filter(prediction_date__gte=start_date)
+        if end_date:
+            predictions = predictions.filter(prediction_date__lte=end_date)
+        if categoria_id:
+            predictions = predictions.filter(categoria_id=categoria_id)
+
+        predictions = predictions.select_related('categoria', 'producto').order_by('prediction_date')
+
+        serializer = SalesPredictionSerializer(predictions, many=True)
+
+        return Response({
+            'success': True,
+            'count': len(serializer.data),
+            'data': serializer.data
+        })
+
+    except ModelMetrics.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'No active model found. Please train a model first.',
+            'data': []
+        })
+
+
+@api_view(['GET'])
+def model_status(request):
+    """Get current model status and metrics"""
+    if not request.user:
+        return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    from .utils import has_permission
+    if not has_permission(request.user, 'order.read'):
+        return Response({'message': 'No permission'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        from .models import ModelMetrics
+        from .serializers import ModelMetricsSerializer
+
+        active_model = ModelMetrics.objects.filter(is_active=True).latest('trained_at')
+        serializer = ModelMetricsSerializer(active_model)
+
+        # Check if model file exists
+        import os
+        model_exists = os.path.exists(active_model.model_path)
+
+        # Get number of predictions
+        predictions_count = SalesPrediction.objects.filter(model_metrics=active_model).count()
+
+        return Response({
+            'success': True,
+            'has_model': True,
+            'model_exists_on_disk': model_exists,
+            'model_metrics': serializer.data,
+            'predictions_count': predictions_count
+        })
+
+    except ModelMetrics.DoesNotExist:
+        return Response({
+            'success': True,
+            'has_model': False,
+            'message': 'No model has been trained yet.'
+        })

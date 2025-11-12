@@ -3,7 +3,7 @@ from .models import (
     User, Role, Permission, UserRole, RolePermission,
     Marca, Categoria, Unidad, Producto, Cliente,
     CarritoItem, Orden, OrdenItem, Lote, Alert,
-    Bitacora, Pago
+    Bitacora, Pago, ModelMetrics, SalesPrediction
 )
 
 
@@ -389,3 +389,26 @@ class PagoSerializer(serializers.ModelSerializer):
         model = Pago
         fields = ['id', 'orden_id', 'orden', 'stripe_id', 'monto', 'estado',
                   'metodo', 'factura_url', 'created_at']
+
+
+# ============== ANALYTICS & PREDICTIONS SERIALIZERS ==============
+
+class ModelMetricsSerializer(serializers.ModelSerializer):
+    """Serializer for ML model metrics"""
+    class Meta:
+        model = ModelMetrics
+        fields = ['id', 'model_name', 'rmse', 'r2_score', 'mae', 'training_samples',
+                  'features_used', 'trained_at', 'is_active']
+
+
+class SalesPredictionSerializer(serializers.ModelSerializer):
+    """Serializer for sales predictions"""
+    categoria_nombre = serializers.CharField(source='categoria.nombre', read_only=True)
+    producto_nombre = serializers.CharField(source='producto.nombre', read_only=True)
+
+    class Meta:
+        model = SalesPrediction
+        fields = ['id', 'prediction_date', 'predicted_amount', 'predicted_quantity',
+                  'categoria', 'categoria_nombre', 'producto', 'producto_nombre',
+                  'actual_amount', 'actual_quantity', 'confidence_interval_lower',
+                  'confidence_interval_upper', 'created_at']
