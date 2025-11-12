@@ -217,7 +217,7 @@ def predict_future_sales(days_ahead=30, by_category=True):
     predictions = []
     start_date = datetime.now().date()
 
-    for day_offset in range(1, days_ahead + 1):
+    for day_offset in range(0, days_ahead):  # Start from today (0) instead of tomorrow (1)
         pred_date = start_date + timedelta(days=day_offset)
 
         for categoria in categorias:
