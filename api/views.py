@@ -2118,7 +2118,10 @@ def train_prediction_model(request):
     try:
         from .ml_model import train_and_save_model
 
+        print("🔄 Starting model training...")
         result = train_and_save_model()
+        print(f"✅ Model trained successfully!")
+        print(f"  Predictions generated: {result['predictions_generated']}")
 
         from .serializers import ModelMetricsSerializer
         metrics_serializer = ModelMetricsSerializer(result['model_metrics'])
@@ -2162,23 +2165,43 @@ def get_predictions(request):
     end_date = request.GET.get('end_date')
     categoria_id = request.GET.get('categoria_id')
 
+    print(f"📡 GET /api/analytics/predictions")
+    print(f"  start_date: {start_date}")
+    print(f"  end_date: {end_date}")
+    print(f"  categoria_id: {categoria_id}")
+
     # Get active model's predictions
     try:
         from .models import ModelMetrics
         active_model = ModelMetrics.objects.filter(is_active=True).latest('trained_at')
+        print(f"✅ Active model found: {active_model.id} (trained: {active_model.trained_at})")
+
         predictions = SalesPrediction.objects.filter(model_metrics=active_model)
+        total_predictions = predictions.count()
+        print(f"  Total predictions for this model: {total_predictions}")
 
         if start_date:
             predictions = predictions.filter(prediction_date__gte=start_date)
+            print(f"  After start_date filter (>= {start_date}): {predictions.count()}")
         if end_date:
             predictions = predictions.filter(prediction_date__lte=end_date)
+            print(f"  After end_date filter (<= {end_date}): {predictions.count()}")
         if categoria_id:
             predictions = predictions.filter(categoria_id=categoria_id)
+            print(f"  After categoria filter: {predictions.count()}")
+
+        # Get date range of predictions in DB
+        if total_predictions > 0:
+            all_preds = SalesPrediction.objects.filter(model_metrics=active_model).order_by('prediction_date')
+            first_date = all_preds.first().prediction_date if all_preds.exists() else None
+            last_date = all_preds.last().prediction_date if all_preds.exists() else None
+            print(f"  Date range in DB: {first_date} to {last_date}")
 
         predictions = predictions.select_related('categoria', 'producto').order_by('prediction_date')
 
         serializer = SalesPredictionSerializer(predictions, many=True)
 
+        print(f"✅ Returning {len(serializer.data)} predictions")
         return Response({
             'success': True,
             'count': len(serializer.data),
@@ -2186,6 +2209,7 @@ def get_predictions(request):
         })
 
     except ModelMetrics.DoesNotExist:
+        print("❌ No active model found")
         return Response({
             'success': False,
             'message': 'No active model found. Please train a model first.',
