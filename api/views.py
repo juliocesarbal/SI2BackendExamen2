@@ -615,12 +615,19 @@ def list_ordenes(request):
     if not request.user:
         return Response({'message': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    from .utils import has_permission
+    from .models import UserRole
 
-    # Base queryset según permisos
-    if has_permission(request.user, 'order.read'):
+    # Check if user is admin or vendedor
+    user_roles = UserRole.objects.filter(user=request.user).select_related('role')
+    role_names = [ur.role.name for ur in user_roles]
+    is_admin_or_vendedor = any(role in ['ADMIN', 'VENDEDOR'] for role in role_names)
+
+    # Base queryset según rol
+    if is_admin_or_vendedor or request.user.is_superuser:
+        # Admin/Vendedor can see all orders
         queryset = Orden.objects.all()
     else:
+        # Clients only see their own orders
         queryset = Orden.objects.filter(user=request.user)
 
     # Filtro por estado
