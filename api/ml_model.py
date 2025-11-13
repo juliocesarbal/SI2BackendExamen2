@@ -278,9 +278,18 @@ def save_predictions(predictions, model_metrics):
         predictions: List of prediction dictionaries
         model_metrics: ModelMetrics object
     """
+    print(f"💾 Saving {len(predictions)} predictions to database...")
+
     # Delete old predictions for the same dates
     dates = [p['prediction_date'] for p in predictions]
-    SalesPrediction.objects.filter(prediction_date__in=dates).delete()
+    deleted_count, _ = SalesPrediction.objects.filter(prediction_date__in=dates).delete()
+    print(f"  Deleted {deleted_count} old predictions")
+
+    # Get date range
+    if predictions:
+        first_date = min(p['prediction_date'] for p in predictions)
+        last_date = max(p['prediction_date'] for p in predictions)
+        print(f"  Date range: {first_date} to {last_date}")
 
     # Create new predictions
     prediction_objects = []
@@ -298,6 +307,7 @@ def save_predictions(predictions, model_metrics):
         )
 
     SalesPrediction.objects.bulk_create(prediction_objects)
+    print(f"✅ Saved {len(prediction_objects)} predictions successfully")
 
 
 def train_and_save_model():
